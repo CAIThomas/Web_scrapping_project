@@ -1,1 +1,102 @@
+# -*- coding: utf-8 -*-
+
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from bs4 import BeautifulSoup
+from webdriver_manager.chrome import ChromeDriverManager
+import pandas as pd
+import time
+import re
+import csv
+
+# === Conversion durée → minutes (ROBUSTE) ===
+def duration_to_minutes(text):
+    if not text:
+        return None
+
+    text = text.lower()
+    h = re.search(r"(\d+)\s*h", text)
+    m = re.search(r"(\d+)\s*min", text)
+
+    total = 0
+    if h:
+        total += int(h.group(1)) * 60
+    if m:
+        total += int(m.group(1))
+
+    return total if total > 0 else None
+
+
+def scrape_allocine_duree(page_debut=1, page_fin=100, output_file="allocine_durees.csv"):
+
+    options = webdriver.ChromeOptions()
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    # options.add_argument("--headless")  # plus rapide si activé
+
+    driver = webdriver.Chrome(
+        service=Service(ChromeDriverManager().install()),
+        options=options
+    )
+
+    films_data = []
+
+    try:
+        base_url = "https://www.allocine.fr/films/?page="
+
+        for page in range(page_debut, page_fin + 1):
+            print(f"🚀 Page {page}/{page_fin}")
+            driver.get(base_url + str(page))
+
+            WebDriverWait(driver, 15).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "li.mdl"))
+            )
+
+            soup = BeautifulSoup(driver.page_source, "html.parser")
+            films = soup.find_all("li", class_="mdl")
+
+            for film in films:
+                # 🎬 Titre
+                title_tag = film.find("a", class_="meta-title-link")
+                if not title_tag:
+                    continue
+                titre = title_tag.get_text(strip=True)
+
+                # ⏱️ Durée (MÉTHODE FIABLE)
+                duree_min = None
+                info_div = film.find("div", class_="meta-body-info")
+                if info_div:
+                    texte_info = info_div.get_text(" ", strip=True)
+                    duree_min = duration_to_minutes(texte_info)
+
+                films_data.append({
+                    "Titre": titre,
+                    "Durée (min)": duree_min
+                })
+
+            time.sleep(0.8)  # raisonnable
+
+    finally:
+        driver.quit()
+
+    # === Export CSV ===
+    df = pd.DataFrame(films_data)
+    df.to_csv(
+        output_file,
+        index=False,
+        encoding="utf-8-sig",
+        sep=";",
+        quoting=csv.QUOTE_ALL
+    )
+
+    print(f"\n✅ Terminé : {len(df)} films")
+    print(f"📁 Fichier : {output_file}")
+
+
+# === Lancement ===
+if __name__ == "__main__":
+    scrape_allocine_duree(page_debut=1, page_fin=5000)
 
